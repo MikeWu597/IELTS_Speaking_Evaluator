@@ -63,7 +63,7 @@ const axios = require('axios');
 
   // 修改 /chat API 来处理用户输入的消息
   app.post('/chat', async (req, res) => {
-    const { message, user_prompt_params } = req.body; // 添加 user_prompt_params 参数
+    const { message, user_prompt_params, biz_params } = req.body; // 添加 biz_params 参数
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
@@ -87,6 +87,11 @@ const axios = require('axios');
         // 如果提供了 user_prompt_params，则添加到请求体中
         if (user_prompt_params) {
             requestBody.input.user_prompt_params = user_prompt_params;
+        }
+        
+        // 如果提供了 biz_params，则添加到请求体中
+        if (biz_params) {
+            requestBody.input.biz_params = biz_params;
         }
 
         // 发起 HTTP 请求

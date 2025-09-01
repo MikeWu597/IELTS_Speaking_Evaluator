@@ -137,7 +137,7 @@
             
             try {
                 // 构造提示词
-                const prompt = ``;
+                const prompt = ` `;
                 
                 // 发送请求到后端
                 const response = await fetch('/chat', {
@@ -147,7 +147,9 @@
                     },
                     body: JSON.stringify({ 
                         message: prompt,
-                        user_prompt_params: userPromptParams
+                        biz_params: {
+                            user_prompt_params: userPromptParams
+                        }
                     })
                 });
                 
