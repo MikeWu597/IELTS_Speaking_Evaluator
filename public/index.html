@@ -126,6 +126,10 @@
             const question = document.getElementById('question').value;
             const answer = document.getElementById('answer').value;
             
+            // 获取自定义参数（如果有的话）
+            let userPromptParams = null;
+            userPromptParams = { "score": targetScore, "l": length, "q": question, "a": answer };
+            
             // 显示加载状态
             document.getElementById('submitBtn').disabled = true;
             document.getElementById('loading').style.display = 'block';
@@ -133,20 +137,7 @@
             
             try {
                 // 构造提示词
-                const prompt = `请根据以下信息对雅思口语作答进行评估：
-目标分数: ${targetScore}
-作答长度: ${length}
-问题: ${question}
-答案: ${answer}
-                
-请从以下几个方面进行评估：
-1. 流利度和连贯性
-2. 词汇多样性
-3. 语法准确性和复杂性
-4. 发音（根据文本分析）
-5. 整体评价和建议
-
-请给出具体的评分和改进建议。`;
+                const prompt = ``;
                 
                 // 发送请求到后端
                 const response = await fetch('/chat', {
@@ -154,7 +145,10 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ message: prompt })
+                    body: JSON.stringify({ 
+                        message: prompt,
+                        user_prompt_params: userPromptParams
+                    })
                 });
                 
                 if (response.ok) {

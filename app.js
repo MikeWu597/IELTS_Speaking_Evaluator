@@ -63,7 +63,7 @@ const axios = require('axios');
 
   // 修改 /chat API 来处理用户输入的消息
   app.post('/chat', async (req, res) => {
-    const { message } = req.body; // 移除 sess 参数
+    const { message, user_prompt_params } = req.body; // 添加 user_prompt_params 参数
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
@@ -83,7 +83,11 @@ const axios = require('axios');
             },
             debug: {}
         };
-
+        
+        // 如果提供了 user_prompt_params，则添加到请求体中
+        if (user_prompt_params) {
+            requestBody.input.user_prompt_params = user_prompt_params;
+        }
 
         // 发起 HTTP 请求
         const response = await axios.post(`https://dashscope.aliyuncs.com/api/v1/apps/${appId}/completion`, requestBody, {
