@@ -7,6 +7,7 @@
     <link href="css/bootstrap.min.css" rel="stylesheet">
     <script src="js/bootstrap.bundle.min.js"></script>
     <script src="js/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/diff@5.1.0/dist/diff.min.js"></script>
     <style>
         /* 自定义样式 */
         .main-container {
@@ -61,6 +62,42 @@
             margin-left: 0;
             color: #6c757d;
         }
+        .diff-old {
+            color: red;
+            text-decoration: line-through;
+            cursor: pointer;
+        }
+        .diff-new {
+            color: red;
+            cursor: pointer;
+        }
+        .diff-new::before {
+            content: "(";
+        }
+        .diff-new::after {
+            content: ")";
+        }
+        .optimized-highlight {
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .modified {
+            font-weight: normal;
+            color: inherit;
+            text-decoration: none;
+        }
+        /* 处理相邻的添加元素 */
+        .diff-new + .diff-new {
+            margin-left: 0;
+        }
+        
+        .diff-new + .diff-new::before {
+            content: "";
+        }
+        
+        .diff-new + .diff-new::after {
+            content: "";
+        }
     </style>
 </head>
 <body>
@@ -101,7 +138,14 @@
                             </form>
                             
                             <div id="result" style="display: none;">
+                                
+                                <h5 class="mt-4">回答：</h5>
+                                <div id="compareContent" class="mt-2"></div>
+                                
+                                <h5>优化版：</h5>
                                 <div id="resultContent"></div>
+                                
+                                <button id="copyButton" class="btn btn-secondary mt-3" style="display: none;">复制全部内容</button>
                             </div>
                         </div>
                     </div>
@@ -117,6 +161,99 @@
             smartypants: true
         });
 
+        // 使用jsdiff进行文本比较
+        function compareTexts(original, optimized) {
+            // 使用diff库计算差异，忽略大小写和标点符号
+            const options = { ignoreCase: true };
+            const diff = Diff.diffWords(stripPunctuation(original), stripPunctuation(optimized), options);
+            
+            // 合并连续的添加和删除操作
+            const combinedDiff = [];
+            let lastPart = null;
+            
+            diff.forEach(part => {
+                if (lastPart) {
+                    // 如果两个部分都是添加或者都是删除，则合并它们
+                    if (lastPart.added === part.added && lastPart.removed === part.removed) {
+                        lastPart.value += ' ' + part.value;
+                    } else {
+                        combinedDiff.push(lastPart);
+                        lastPart = part;
+                    }
+                } else {
+                    lastPart = part;
+                }
+            });
+            
+            // 不要忘记添加最后一个部分
+            if (lastPart) {
+                combinedDiff.push(lastPart);
+            }
+            
+            let result = '';
+            for (let i = 0; i < combinedDiff.length; i++) {
+                const part = combinedDiff[i];
+                if (part.added) {
+                    // 新增的部分用红色括号标记，确保连续添加的部分合并显示
+                    result += `<span class="diff-new" data-original="${part.value.trim()}">${part.value.trim()}</span>`;
+                } else if (part.removed) {
+                    // 删除的部分用红色删除线标记
+                    result += `<span class="diff-old" data-original="${part.value.trim()}">${part.value.trim()}</span>`;
+                } else {
+                    // 未变化的部分正常显示
+                    result += part.value;
+                }
+                
+                // 只有在不是最后一个元素且下一个元素不是添加元素时才添加空格
+                if (i < combinedDiff.length - 1 && !combinedDiff[i+1].added) {
+                    result += ' ';
+                }
+            }
+            
+            return result;
+        }
+        
+        // 辅助函数：去除标点符号
+        function stripPunctuation(text) {
+            return text.replace(/[^\w\s]|_/g, "").replace(/\s+/g, " ");
+        }
+
+        // 切换显示原始文本和修改后文本的功能
+        function toggleTextDisplay(element) {
+            const originalText = element.getAttribute('data-original');
+            const isAdded = element.classList.contains('diff-new');
+            const isRemoved = element.classList.contains('diff-old');
+            
+            if (element.classList.contains('modified')) {
+                // 恢复为修改后的显示
+                if (isAdded) {
+                    element.textContent = originalText;
+                } else if (isRemoved) {
+                    element.textContent = originalText;
+                }
+                element.classList.remove('modified');
+            } else {
+                // 显示原始文本
+                element.textContent = originalText;
+                element.classList.add('modified');
+            }
+        }
+
+        // 提取优化后文本的函数（假设优化文本在特定格式的响应中）
+        function extractOptimizedText(responseText) {
+            // 这里假设优化后的文本在响应的特定部分
+            // 实际实现需要根据API响应格式进行调整
+            try {
+                // 如果响应是JSON格式，尝试解析
+                const data = JSON.parse(responseText);
+                // 根据实际响应结构调整路径
+                return data.optimized_text || data.output?.text || responseText;
+            } catch (e) {
+                // 如果不是JSON格式，直接返回
+                return responseText;
+            }
+        }
+
         document.getElementById('speakingForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -125,6 +262,9 @@
             const length = document.getElementById('length').value;
             const question = document.getElementById('question').value;
             const answer = document.getElementById('answer').value;
+            
+            // 保存原始答案用于后续比较
+            const originalAnswer = answer;
             
             // 获取自定义参数（如果有的话）
             let userPromptParams = null;
@@ -138,7 +278,7 @@
             try {
                 // 构造提示词
                 const prompt = ` `;
-                
+
                 // 发送请求到后端
                 const response = await fetch('/chat', {
                     method: 'POST',
@@ -186,6 +326,31 @@
                             }
                         }
                     }
+                    
+                    // 提取优化后的文本并进行比较
+                    // 这里假设优化后的文本在响应的特定字段中
+                    // 在实际应用中，需要根据API响应格式进行调整
+                    const optimizedText = extractOptimizedText(aggregatedMessage);
+                    if (optimizedText && optimizedText !== originalAnswer) {
+                        const comparison = compareTexts(originalAnswer, optimizedText);
+                        document.getElementById('compareContent').innerHTML = comparison;
+                        
+                        // 为比较内容添加点击事件监听器
+                        const diffElements = document.querySelectorAll('#compareContent .diff-new, #compareContent .diff-old');
+                        diffElements.forEach(element => {
+                            element.addEventListener('click', function() {
+                                toggleTextDisplay(this);
+                            });
+                        });
+                        
+                        // 为优化版内容添加加粗标记
+                        highlightOptimizedText(resultContent);
+                    } else {
+                        document.getElementById('compareContent').innerHTML = '<p>未找到优化后的文本或文本无变化</p>';
+                    }
+                    
+                    // 显示复制按钮
+                    document.getElementById('copyButton').style.display = 'block';
                 } else {
                     throw new Error('请求失败');
                 }
@@ -199,6 +364,220 @@
                 document.getElementById('loading').style.display = 'none';
             }
         });
+        
+        // 为复制按钮添加点击事件监听器
+        document.getElementById('copyButton').addEventListener('click', copyResultToClipboard);
+        
+        // 高亮显示优化版文本中的修改部分
+        function highlightOptimizedText(container) {
+            const originalAnswer = document.getElementById('answer').value;
+            const optimizedText = container.innerText || container.textContent;
+            
+            // 这里我们可以使用diff来识别优化文本中的修改部分并加粗
+            // 为了简化，我们只在优化文本中查找原始答案中没有的词并加粗
+            const originalWords = new Set(stripPunctuation(originalAnswer).toLowerCase().split(/\s+/));
+            const optimizedWords = stripPunctuation(optimizedText).split(/\s+/);
+            
+            // 这是一个简化版本的实现，实际应用中可能需要更复杂的算法
+            let htmlContent = container.innerHTML;
+            const wordsToBold = optimizedWords.filter(word => 
+                !originalWords.has(stripPunctuation(word).toLowerCase())
+            );
+            
+            // 为所有新词添加加粗标记
+            wordsToBold.forEach(word => {
+                const cleanWord = stripPunctuation(word);
+                if (cleanWord.length > 0) {
+                    // 使用更精确的匹配，避免部分匹配
+                    const regex = new RegExp(`(\\b${cleanWord}\\b)`, 'gi');
+                    htmlContent = htmlContent.replace(regex, '<strong class="optimized-highlight" data-original="$1">$1</strong>');
+                }
+            });
+            
+            container.innerHTML = htmlContent;
+            
+            // 为加粗的词添加点击事件监听器
+            const boldElements = container.querySelectorAll('strong.optimized-highlight');
+            boldElements.forEach(element => {
+                element.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (this.classList.contains('restored')) {
+                        // 恢复加粗
+                        const originalText = this.getAttribute('data-original');
+                        this.innerHTML = originalText;
+                        this.classList.remove('restored');
+                    } else {
+                        // 显示原始文本
+                        const originalText = this.getAttribute('data-original');
+                        this.outerHTML = `<span class="restored" data-original="${originalText}">${originalText}</span>`;
+                    }
+                });
+            });
+        }
+        
+        // 复制结果到剪贴板
+        async function copyResultToClipboard() {
+            const resultElement = document.getElementById('result');
+            
+            try {
+                // 使用现代Clipboard API
+                if (navigator.clipboard && window.isSecureContext) {
+                    // 提取结果内容并保留格式
+                    let textToCopy = '';
+                    
+                    // 添加"回答："标题
+                    textToCopy += "回答：\n";
+                    
+                    // 获取比较内容
+                    const compareContent = document.getElementById('compareContent');
+                    textToCopy += getTextWithFormatting(compareContent) + '\n\n';
+                    
+                    // 添加"优化版："标题
+                    textToCopy += "优化版：\n";
+                    
+                    // 获取优化版内容
+                    const resultContent = document.getElementById('resultContent');
+                    textToCopy += getTextWithFormatting(resultContent);
+                    
+                    await navigator.clipboard.writeText(textToCopy);
+                    
+                    // 显示复制成功的提示
+                    const copyButton = document.getElementById('copyButton');
+                    const originalText = copyButton.textContent;
+                    copyButton.textContent = '已复制!';
+                    copyButton.classList.remove('btn-secondary');
+                    copyButton.classList.add('btn-success');
+                    
+                    setTimeout(() => {
+                        copyButton.textContent = originalText;
+                        copyButton.classList.remove('btn-success');
+                        copyButton.classList.add('btn-secondary');
+                    }, 2000);
+                } else {
+                    // 降级到传统方法
+                    fallbackCopyTextToClipboard();
+                }
+            } catch (err) {
+                console.error('复制失败: ', err);
+                // 显示复制失败的提示
+                const copyButton = document.getElementById('copyButton');
+                const originalText = copyButton.textContent;
+                copyButton.textContent = '复制失败';
+                copyButton.classList.remove('btn-secondary');
+                copyButton.classList.add('btn-danger');
+                
+                setTimeout(() => {
+                    copyButton.textContent = originalText;
+                    copyButton.classList.remove('btn-danger');
+                    copyButton.classList.add('btn-secondary');
+                }, 2000);
+            }
+        }
+        
+        // 降级复制方法
+        function fallbackCopyTextToClipboard() {
+            const textarea = document.createElement('textarea');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '0';
+            textarea.style.top = '0';
+            textarea.style.opacity = '0';
+            
+            // 提取结果内容并保留格式
+            let textToCopy = '';
+            
+            // 添加"回答："标题
+            textToCopy += "回答：\n";
+            
+            // 获取比较内容
+            const compareContent = document.getElementById('compareContent');
+            textToCopy += getTextWithFormatting(compareContent) + '\n\n';
+            
+            // 添加"优化版："标题
+            textToCopy += "优化版：\n";
+            
+            // 获取优化版内容
+            const resultContent = document.getElementById('resultContent');
+            textToCopy += getTextWithFormatting(resultContent);
+            
+            textarea.value = textToCopy;
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                // 显示复制成功的提示
+                const copyButton = document.getElementById('copyButton');
+                const originalText = copyButton.textContent;
+                copyButton.textContent = successful ? '已复制!' : '复制失败';
+                copyButton.classList.remove('btn-secondary');
+                copyButton.classList.add(successful ? 'btn-success' : 'btn-danger');
+                
+                setTimeout(() => {
+                    copyButton.textContent = originalText;
+                    copyButton.classList.remove(successful ? 'btn-success' : 'btn-danger');
+                    copyButton.classList.add('btn-secondary');
+                }, 2000);
+            } catch (err) {
+                console.error('复制失败: ', err);
+                // 显示复制失败的提示
+                const copyButton = document.getElementById('copyButton');
+                const originalText = copyButton.textContent;
+                copyButton.textContent = '复制失败';
+                copyButton.classList.remove('btn-secondary');
+                copyButton.classList.add('btn-danger');
+                
+                setTimeout(() => {
+                    copyButton.textContent = originalText;
+                    copyButton.classList.remove('btn-danger');
+                    copyButton.classList.add('btn-secondary');
+                }, 2000);
+            }
+            
+            // 清理临时元素
+            document.body.removeChild(textarea);
+        }
+        
+        // 获取带格式的文本内容
+        function getTextWithFormatting(element) {
+            let text = '';
+            
+            for (let node of element.childNodes) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    text += node.textContent;
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    const tagName = node.tagName.toLowerCase();
+                    
+                    if (tagName === 'span') {
+                        if (node.classList.contains('diff-new')) {
+                            // 添加部分用括号包围
+                            text += '(' + node.textContent + ')';
+                        } else if (node.classList.contains('diff-old')) {
+                            // 删除部分用删除线表示
+                            text += node.textContent;
+                        } else {
+                            text += node.textContent;
+                        }
+                    } else if (tagName === 'strong' && node.classList.contains('optimized-highlight')) {
+                        // 加粗部分保持加粗
+                        text += '**' + node.textContent + '**';
+                    } else if (tagName === 'br') {
+                        text += '\n';
+                    } else if (tagName === 'p') {
+                        text += getTextWithFormatting(node) + '\n';
+                    } else if (tagName === 'div') {
+                        text += getTextWithFormatting(node);
+                    } else if (tagName === 'h1' || tagName === 'h2' || tagName === 'h3' || 
+                               tagName === 'h4' || tagName === 'h5' || tagName === 'h6') {
+                        text += '\n' + getTextWithFormatting(node) + '\n';
+                    } else {
+                        text += getTextWithFormatting(node);
+                    }
+                }
+            }
+            
+            return text;
+        }
     </script>
 </body>
 </html>

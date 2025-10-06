@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agatha Bot</title>
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <script src="js/bootstrap.bundle.min.js"></script>
+    <script src="js/marked.min.js"></script>
+    <style>
+        /* 自定义样式 */
+        .main-container {
+            max-width: 100%;
+            height: calc(100vh - 100px);
+        }
+        .form-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background-color: #f8f9fa;
+            min-height: 100px;
+        }
+        .loading {
+            display: none;
+            margin-top: 10px;
+        }
+        #resultContent {
+            line-height: 1.6;
+        }
+        #resultContent h1, #resultContent h2, #resultContent h3 {
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        #resultContent p {
+            margin-bottom: 1rem;
+        }
+        #resultContent ul, #resultContent ol {
+            margin-bottom: 1rem;
+            padding-left: 2rem;
+        }
+        #resultContent li {
+            margin-bottom: 0.25rem;
+        }
+        #resultContent pre {
+            background-color: #e9ecef;
+            padding: 1rem;
+            border-radius: 0.25rem;
+            overflow-x: auto;
+        }
+        #resultContent code {
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #resultContent blockquote {
+            border-left: 4px solid #007bff;
+            padding-left: 1rem;
+            margin-left: 0;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container mt-3">
+        <div class="row justify-content-center">
+            <div class="col-md-12">
+                <div class="card main-container">
+                    <div class="card-header">
+                        IELTS Speaking Evaluator
+                    </div>
+                    <div class="card-body">
+                        <div class="form-container">
+                            <form id="speakingForm">
+                                <div class="mb-3">
+                                    <label for="targetScore" class="form-label">目标分数</label>
+                                    <input type="number" class="form-control" id="targetScore" step="0.5" min="0" max="9" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="length" class="form-label">长度</label>
+                                    <input type="number" class="form-control" id="length" min="0" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="question" class="form-label">问题</label>
+                                    <input type="text" class="form-control" id="question" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="answer" class="form-label">答案</label>
+                                    <textarea class="form-control" id="answer" rows="5" required></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary" id="submitBtn">提交</button>
+                                <div class="loading" id="loading">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span>处理中...</span>
+                                </div>
+                            </form>
+                            
+                            <div id="result" style="display: none;">
+                                <div id="resultContent"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 配置marked库
+        marked.setOptions({
+            breaks: true,
+            smartypants: true
+        });
+
+        document.getElementById('speakingForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            // 获取表单数据
+            const targetScore = document.getElementById('targetScore').value;
+            const length = document.getElementById('length').value;
+            const question = document.getElementById('question').value;
+            const answer = document.getElementById('answer').value;
+            
+            // 获取自定义参数（如果有的话）
+            let userPromptParams = null;
+            userPromptParams = { "score": targetScore, "l": length, "q": question, "a": answer };
+            
+            // 显示加载状态
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').style.display = 'none';
+            
+            try {
+                // 构造提示词
+                const prompt = ` `;
+                
+                // 发送请求到后端
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        message: prompt,
+                        biz_params: {
+                            user_prompt_params: userPromptParams
+                        }
+                    })
+                });
+                
+                if (response.ok) {
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder('utf-8');
+                    let buffer = '';
+                    let aggregatedMessage = '';
+                    
+                    // 显示结果区域
+                    document.getElementById('result').style.display = 'block';
+                    const resultContent = document.getElementById('resultContent');
+                    resultContent.innerHTML = '';
+                    
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop();
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('data:')) {
+                                const data = line.substring(6);
+                                try {
+                                    const chunk = JSON.parse(data);
+                                    aggregatedMessage += chunk.output.text;
+                                    // 使用marked库将markdown转换为HTML
+                                    resultContent.innerHTML = marked.parse(aggregatedMessage);
+                                } catch (error) {
+                                    console.error('Error parsing chunk:', error);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    throw new Error('请求失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').style.display = 'block';
+                document.getElementById('resultContent').innerHTML = '处理失败: ' + error.message;
+            } finally {
+                // 恢复按钮状态
+                document.getElementById('submitBtn').disabled = false;
+                document.getElementById('loading').style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
